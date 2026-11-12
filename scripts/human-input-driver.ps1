@@ -21,6 +21,8 @@
 #   {"op":"windows"}                             -> enumerate visible windows
 #   {"op":"active"}                              -> foreground window
 #   {"op":"focus","hwnd":123456}                 -> bring to foreground
+#   {"op":"capture","path":"C:\\tmp\\shot.png","x":0,"y":0,"w":1920,"h":1080,"scale":1}
+#                                                 -> grab screen region to a PNG file
 #   {"op":"wait","ms":300}
 #   {"op":"quit"}
 
@@ -33,7 +35,7 @@ try {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 }
 
-Add-Type -TypeDefinition @'
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -336,8 +338,7 @@ public static class HumanInput
     public static string Active()
     {
         IntPtr h = GetForegroundWindow();
-        int len = GetWindowTextLengthW(h);
-        StringBuilder t = new StringBuilder(len + 2);
+        int len = GetWindowTextLengthW(h);        StringBuilder t = new StringBuilder(len + 2);
         GetWindowText(h, t, t.Capacity);
         return "{\"title\":" + J(t.ToString()) + ",\"hwnd\":" + h.ToInt64() + "}";
     }
@@ -347,8 +348,47 @@ public static class HumanInput
         ShowWindow(new IntPtr(hwnd), 9);
         return SetForegroundWindow(new IntPtr(hwnd));
     }
+
+    // ---- 屏幕捕获：把指定矩形存成 PNG ----
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+
+    public static string Capture(int x, int y, int w, int h, string path)
+    {
+        if (w <= 0 || h <= 0) { return "ERR: invalid size"; }
+        IntPtr screenDc = GetDC(IntPtr.Zero);
+        IntPtr memDc = CreateCompatibleDC(screenDc);
+        IntPtr bmp = CreateCompatibleBitmap(screenDc, w, h);
+        IntPtr old = SelectObject(memDc, bmp);
+        try
+        {
+            bool ok = BitBlt(memDc, 0, 0, w, h, screenDc, x, y, 0x00CC0020); // SRCCOPY
+            if (!ok) { return "ERR: BitBlt failed"; }
+            using (System.Drawing.Bitmap image = System.Drawing.Image.FromHbitmap(bmp))
+            {
+                image.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            return "OK " + path + " " + w + "x" + h;
+        }
+        finally
+        {
+            SelectObject(memDc, old);
+            DeleteObject(bmp);
+            DeleteDC(memDc);
+            ReleaseDC(IntPtr.Zero, screenDc);
+        }
+    }
 }
 '@
+
+try { Add-Type -AssemblyName System.Drawing } catch { }
+
 
 function Emit($obj) {
   Write-Output ($obj | ConvertTo-Json -Compress -Depth 8)
@@ -455,6 +495,22 @@ while ($true) {
         $ok = [HumanInput]::Focus([long]$req.hwnd)
         Start-Sleep -Milliseconds 140
         Emit @{ ok = $true; result = $ok }
+      }
+      "capture" {
+        Add-Type -AssemblyName System.Drawing
+        $path = [string]$req.path
+        if ([string]::IsNullOrWhiteSpace($path)) { Emit @{ ok = $false; error = "capture 需要 path" } }
+        else {
+          $x = 0; if ($null -ne $req.x) { $x = [int]$req.x }
+          $y = 0; if ($null -ne $req.y) { $y = [int]$req.y }
+          $w = [HumanInput]::GetSystemMetrics(0); if ($null -ne $req.w) { $w = [int]$req.w }
+          $h = [HumanInput]::GetSystemMetrics(1); if ($null -ne $req.h) { $h = [int]$req.h }
+          $dir = Split-Path -Parent $path
+          if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+          $r = [HumanInput]::Capture($x, $y, $w, $h, $path)
+          if ($r.StartsWith("OK")) { Emit @{ ok = $true; result = @{ path = $path; width = $w; height = $h } } }
+          else { Emit @{ ok = $false; error = $r } }
+        }
       }
       "wait" {
         $ms = 200; if ($null -ne $req.ms) { $ms = [int]$req.ms }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-human-input",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Human-like mouse and keyboard control for DSH: gradual eased cursor movement, press/release, drag, per-character typing. No screenshot-guessing.",
   "type": "module",
   "main": "index.js",
