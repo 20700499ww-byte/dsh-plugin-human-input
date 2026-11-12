@@ -7,16 +7,13 @@
  * 设计取舍
  * --------
  * 1. 原语化：只提供 move / click / press / release / scroll / type / key
- *    这类底层动作，由模型自己串成一串。这样它就能「先挪 40 像素、停一下、
- *    再挪过去、按下、松开」，而不是跳着走。
- * 2. 真人轨迹：移动走二次贝塞尔弧度 + easeOutCubic 缓动 + 递减抖动 +
- *    终点微过冲回正；打字有随机间隔。这在驱动脚本里做，不是直线插值。
+ *    这类底层动作，由模型自己串成一串。
+ * 2. 真人轨迹：二次贝塞尔弧度 + easeOutCubic 缓动 + 递减抖动 + 终点微过冲回正；
+ *    打字有随机间隔。这在驱动脚本里做，不是直线插值。
  * 3. 常驻驱动：鼠标键盘由一个常驻 PowerShell 进程执行（Win32 SendInput /
- *    mouse_event）。常驻是为了避免每次操作都付 ~700ms 的进程启动开销，
- *    否则「一步一步挪」会卡到没法用。
+ *    mouse_event）。常驻避免每次操作付 ~700ms 的进程启动开销。
  * 4. 可中断：任何时刻按 ESC 立刻中止当前动作并返回 aborted。
- * 5. 零依赖：不 import 任何 @deepseek-ai/* 包，只向 ctx.tools 注册普通
- *    ToolDefinition，避免 peer 依赖解析问题。
+ * 5. 零依赖：不 import 任何 @deepseek-ai/* 包，直接注册普通 ToolDefinition。
  *
  * 服务依赖：tools
  */
@@ -196,13 +193,15 @@ class Driver {
       child.stdin.write(JSON.stringify({ op: 'quit' }) + '\n')
     } catch {}
 
-    const graceful = await Promise.race([exited.then(() => true), new Promise((r) => setTimeout(() => r(false), 800))])
+    const graceful = await Promise.race([
+      exited.then(() => true),
+      new Promise((r) => setTimeout(() => r(false), 800)),
+    ])
     if (!graceful) {
       try {
         child.kill()
       } catch {}
     }
-    // Windows 上 PowerShell 可能留下子进程，用 taskkill 整棵树兜底
     if (process.platform === 'win32' && child.pid) {
       try {
         const { execFile } = await import('node:child_process')
@@ -221,15 +220,16 @@ function estimateTimeout(req) {
   return Math.max(8000, ms + typing + clicks + 8000)
 }
 
+// ---------------------------------------------------------------------------
+// Schema：这里用「原始 JSON Schema」而不是 defineTool 的 author 简写，
+// 因为本插件刻意不依赖 @deepseek-ai/dsh-tools（避免 profile 里解析不到 peer）。
+// ---------------------------------------------------------------------------
+
+/** 统一的输出 schema：宽松对象，保留驱动返回的一切字段 */
 const OUT_SCHEMA = {
   type: 'object',
   additionalProperties: true,
-  properties: {
-    ok: { type: 'boolean' },
-    result: { type: 'json' },
-    error: { type: 'string' },
-    aborted: { type: 'boolean' },
-  },
+  properties: {},
 }
 
 function textRender(value) {
@@ -274,42 +274,42 @@ export function apply(ctx, config = {}) {
       'drag 拖拽；scroll 滚轮；pos 读当前位置；screen 读屏幕尺寸。' +
       '需要"一步一步"操控时，连续多次 move_by（每次几十像素），而不是一次跳到位。',
     parameters: {
-      action: {
-        type: 'string',
-        enum: ['move', 'move_by', 'click', 'press', 'release', 'drag', 'scroll', 'pos', 'screen'],
-        required: true,
-        description: '要执行的指针动作',
-      },
-      x: { type: 'number', description: 'move 的目标 X（屏幕像素）' },
-      y: { type: 'number', description: 'move 的目标 Y（屏幕像素）' },
-      dx: { type: 'number', description: 'move_by 的水平增量，正数向右' },
-      dy: { type: 'number', description: 'move_by 的垂直增量，正数向下' },
-      button: {
-        type: 'string',
-        enum: ['left', 'right', 'middle'],
-        description: 'click/press/release 的按键，默认 left',
-      },
-      count: { type: 'number', description: 'click 次数，1=单击，2=双击，默认 1' },
-      from: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          x: { type: 'number', required: true },
-          y: { type: 'number', required: true },
+      type: 'object',
+      additionalProperties: false,
+      required: ['action'],
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['move', 'move_by', 'click', 'press', 'release', 'drag', 'scroll', 'pos', 'screen'],
+          description: '要执行的指针动作',
         },
-        description: 'drag 的起点坐标',
-      },
-      to: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          x: { type: 'number', required: true },
-          y: { type: 'number', required: true },
+        x: { type: 'number', description: 'move 的目标 X（屏幕像素）' },
+        y: { type: 'number', description: 'move 的目标 Y（屏幕像素）' },
+        dx: { type: 'number', description: 'move_by 的水平增量，正数向右' },
+        dy: { type: 'number', description: 'move_by 的垂直增量，正数向下' },
+        button: {
+          type: 'string',
+          enum: ['left', 'right', 'middle'],
+          description: 'click/press/release 的按键，默认 left',
         },
-        description: 'drag 的终点坐标',
+        count: { type: 'integer', description: 'click 次数，1=单击，2=双击，默认 1' },
+        from: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['x', 'y'],
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          description: 'drag 的起点坐标',
+        },
+        to: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['x', 'y'],
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          description: 'drag 的终点坐标',
+        },
+        durationMs: { type: 'number', description: '移动总时长（毫秒）。慢一点更像人：300~900' },
+        clicks: { type: 'integer', description: 'scroll 的格数，正数向下，负数向上' },
       },
-      durationMs: { type: 'number', description: '移动总时长（毫秒）。慢一点更像人：300~900' },
-      clicks: { type: 'number', description: 'scroll 的格数，正数向下，负数向上' },
     },
     output: { schema: OUT_SCHEMA, render: (_a, v) => textRender(v.result) },
     isConcurrencySafe: () => false,
@@ -356,10 +356,15 @@ export function apply(ctx, config = {}) {
       '人类式键盘操作。action=type 逐字输入（支持中文，字符间随机间隔）；' +
       'action=key 按组合键，如 ctrl+c、alt+tab、ctrl+shift+esc、enter、f5、win+r。',
     parameters: {
-      action: { type: 'string', enum: ['type', 'key'], required: true, description: 'type=输入文本；key=按组合键' },
-      text: { type: 'string', description: 'type 时要输入的文本（\\n 换行，\\t 制表）' },
-      combo: { type: 'string', description: 'key 时的组合键，如 ctrl+c、alt+tab、enter、f5、win+r' },
-      delayMs: { type: 'number', description: 'type 时每字间隔毫秒，默认 35；越小越快' },
+      type: 'object',
+      additionalProperties: false,
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['type', 'key'], description: 'type=输入文本；key=按组合键' },
+        text: { type: 'string', description: 'type 时要输入的文本（\\n 换行，\\t 制表）' },
+        combo: { type: 'string', description: 'key 时的组合键，如 ctrl+c、alt+tab、enter、f5、win+r' },
+        delayMs: { type: 'integer', description: 'type 时每字间隔毫秒，默认 35；越小越快' },
+      },
     },
     output: { schema: OUT_SCHEMA, render: (_a, v) => textRender(v.result) },
     isConcurrencySafe: () => false,
@@ -381,7 +386,7 @@ export function apply(ctx, config = {}) {
   })
 
   // ------------------------------------------------------------------
-  // 3) 窗口（不截图，只取标题与位置）
+  // 3) 窗口
   // ------------------------------------------------------------------
   ctx.tools.register({
     name: 'human_window',
@@ -390,8 +395,13 @@ export function apply(ctx, config = {}) {
       'action=active 取当前前台窗口；action=focus 把指定 hwnd 提到前台。' +
       '要点击某窗口内的位置时，先用 list 拿到 rect，再用 human_pointer 移到 rect 内的坐标。',
     parameters: {
-      action: { type: 'string', enum: ['list', 'active', 'focus'], required: true, description: '要执行的动作' },
-      hwnd: { type: 'number', description: 'focus 的目标窗口句柄' },
+      type: 'object',
+      additionalProperties: false,
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['list', 'active', 'focus'], description: '要执行的动作' },
+        hwnd: { type: 'number', description: 'focus 的目标窗口句柄' },
+      },
     },
     output: { schema: OUT_SCHEMA, render: (_a, v) => textRender(v.result) },
     isConcurrencySafe: () => true,
@@ -411,7 +421,7 @@ export function apply(ctx, config = {}) {
   })
 
   // ------------------------------------------------------------------
-  // 4) 连续手势脚本（一次调用跑一串微动作，最接近人手连续操作）
+  // 4) 连续手势脚本
   // ------------------------------------------------------------------
   ctx.tools.register({
     name: 'human_script',
@@ -421,32 +431,36 @@ export function apply(ctx, config = {}) {
       '字段与 human_pointer / human_keyboard 相同（move 用 x,y；move_by 用 dx,dy；drag 用 from,to；等）。' +
       '任何时刻按 ESC 中止，返回 aborted。',
     parameters: {
-      steps: {
-        type: 'array',
-        required: true,
-        description: '按顺序执行的动作数组，最多 200 个',
-        items: {
-          type: 'object',
-          additionalProperties: true,
-          properties: {
-            op: {
-              type: 'string',
-              required: true,
-              description: 'move/move_by/click/press/release/drag/scroll/key/type/wait',
+      type: 'object',
+      additionalProperties: false,
+      required: ['steps'],
+      properties: {
+        steps: {
+          type: 'array',
+          description: '按顺序执行的动作数组，最多 200 个',
+          items: {
+            type: 'object',
+            additionalProperties: true,
+            required: ['op'],
+            properties: {
+              op: {
+                type: 'string',
+                description: 'move/move_by/click/press/release/drag/scroll/key/type/wait',
+              },
+              x: { type: 'number' },
+              y: { type: 'number' },
+              dx: { type: 'number' },
+              dy: { type: 'number' },
+              button: { type: 'string' },
+              count: { type: 'integer' },
+              from: { type: 'object', additionalProperties: true },
+              to: { type: 'object', additionalProperties: true },
+              clicks: { type: 'integer' },
+              combo: { type: 'string' },
+              text: { type: 'string' },
+              delay: { type: 'integer' },
+              ms: { type: 'integer' },
             },
-            x: { type: 'number' },
-            y: { type: 'number' },
-            dx: { type: 'number' },
-            dy: { type: 'number' },
-            button: { type: 'string' },
-            count: { type: 'number' },
-            from: { type: 'object', additionalProperties: true },
-            to: { type: 'object', additionalProperties: true },
-            clicks: { type: 'number' },
-            combo: { type: 'string' },
-            text: { type: 'string' },
-            delay: { type: 'number' },
-            ms: { type: 'number' },
           },
         },
       },
