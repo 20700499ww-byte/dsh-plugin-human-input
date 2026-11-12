@@ -1,0 +1,9 @@
+# 本 bundle 向 profile 贡献的配置层。
+# 行里的 name 写包名，安装后由 Node 解析到真实代码。
+- insert:
+    - id: human-input
+      name: dsh-plugin-human-input
+      config:
+        # 速度倍率：1 为默认，2 更快，0.5 更慢更像人
+        speed: 1
+        startupTimeoutMs: 30000
