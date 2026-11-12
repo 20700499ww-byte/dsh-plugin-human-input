@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "人手操控",
-    "description": "让 Agent 像人一样操控鼠标键盘：缓动曲线逐步移动、按下抬起、拖拽、逐字输入，而不是截图猜坐标。"
+    "title": "Human Input",
+    "description": "让 AI 像人一样操控 Windows：缓动曲线移动鼠标、按下抬起、拖拽、逐字输入，并可截图确认结果。"
   }
 }

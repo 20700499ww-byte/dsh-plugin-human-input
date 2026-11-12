@@ -1,4 +1,4 @@
-# human-input-driver.ps1
+﻿# human-input-driver.ps1
 # Resident driver: reads one JSON command per line from stdin, drives mouse/keyboard,
 # writes one JSON result per line to stdout.
 #
@@ -21,6 +21,8 @@
 #   {"op":"windows"}                             -> enumerate visible windows
 #   {"op":"active"}                              -> foreground window
 #   {"op":"focus","hwnd":123456}                 -> bring to foreground
+#   {"op":"capture","path":"C:\\tmp\\shot.png","x":0,"y":0,"w":1920,"h":1080,"scale":1}
+#                                                 -> grab screen region to a PNG file
 #   {"op":"wait","ms":300}
 #   {"op":"quit"}
 
@@ -32,8 +34,16 @@ try {
 } catch {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 }
+# stdin 必须也按 UTF-8 解码，否则中文指令会被系统的 GBK 解码成乱码，JSON.parse 失败
+try {
+  $utf8 = [System.Text.UTF8Encoding]::new($false)
+  [Console]::InputEncoding = $utf8
+  $script:stdinReader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
+} catch {
+  $script:stdinReader = $null
+}
 
-Add-Type -TypeDefinition @'
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -103,8 +113,12 @@ public static class HumanInput
 
     // Human-like trajectory: quadratic bezier bow + easeOutCubic + decaying jitter
     // + a tiny overshoot before settling on the target.
+    public static System.Collections.Generic.List<string> LastTrace = new System.Collections.Generic.List<string>();
+    public static bool TraceEnabled = false;
+
     public static string MoveTo(int tx, int ty, int totalMs)
     {
+        if (TraceEnabled) LastTrace.Clear();
         Read();
         int sx = CX;
         int sy = CY;
@@ -120,8 +134,12 @@ public static class HumanInput
         }
         if (totalMs < 40) { totalMs = 40; }
 
-        int steps = (int)Math.Max(10.0, Math.Min(160.0, dist / 5.0));
-        double bow = (R.NextDouble() - 0.5) * Math.Min(70.0, dist * 0.16);
+        // 步数按距离自适应，且不低于 12：保证小距离也看得见"挪"的过程
+        int steps = (int)Math.Max(12.0, Math.Min(180.0, dist / 4.0));
+        int stepMs = Math.Max(1, totalMs / steps);
+
+        // 曲率：距离越短弧度越小，避免小移动也画大弧
+        double bow = (R.NextDouble() - 0.5) * Math.Min(60.0, dist * 0.14);
         double ux = dx / dist;
         double uy = dy / dist;
         double cx = (sx + tx) / 2.0 + (-uy) * bow;
@@ -132,29 +150,45 @@ public static class HumanInput
             if (Esc()) { return "ESC"; }
 
             double t = (double)i / (double)steps;
-            double e = 1.0 - Math.Pow(1.0 - t, 3.0);
+            // easeInOutCubic：起步和收尾都慢，中段快 —— 比纯 easeOut 更像真人
+            double e = t < 0.5
+                ? 4.0 * t * t * t
+                : 1.0 - Math.Pow(-2.0 * t + 2.0, 3.0) / 2.0;
+
             double x = (1.0 - e) * (1.0 - e) * sx + 2.0 * (1.0 - e) * e * cx + e * e * tx;
             double y = (1.0 - e) * (1.0 - e) * sy + 2.0 * (1.0 - e) * e * cy + e * e * ty;
 
-            double jit = (1.0 - e) * 1.1;
+            // 抖动：中段最大，两端接近 0（手在起步和落点时最稳）
+            double bell = Math.Sin(Math.PI * t);
+            double jit = bell * 0.9;
             int px = (int)Math.Round(x + (R.NextDouble() - 0.5) * jit);
             int py = (int)Math.Round(y + (R.NextDouble() - 0.5) * jit);
 
             SetCursorPos(px, py);
-            Thread.Sleep(Math.Max(2, totalMs / steps));
+            if (TraceEnabled && LastTrace.Count < 400) {
+                POINT got; GetCursorPos(out got);
+                LastTrace.Add((i * 1000 / steps) + "|" + got.X + "," + got.Y);
+            }
+            if (stepMs > 1) { Thread.Sleep(stepMs); }
         }
 
-        if (dist > 140.0)
+        // 落点微调：先小过冲再回正，模拟指尖落定
+        if (dist > 90.0)
         {
-            int ox = tx + (int)Math.Round((R.NextDouble() - 0.5) * 4.0);
-            int oy = ty + (int)Math.Round((R.NextDouble() - 0.5) * 4.0);
+            int ox = tx + (int)Math.Round((R.NextDouble() - 0.5) * 3.0);
+            int oy = ty + (int)Math.Round((R.NextDouble() - 0.5) * 3.0);
             SetCursorPos(ox, oy);
-            Thread.Sleep(16);
+            Thread.Sleep(14);
         }
 
         SetCursorPos(tx, ty);
         Read();
         return CX + "," + CY;
+    }
+
+    public static string GetTrace()
+    {
+        return string.Join(";", LastTrace);
     }
 
     public static void Click(string btn, int count)
@@ -336,8 +370,7 @@ public static class HumanInput
     public static string Active()
     {
         IntPtr h = GetForegroundWindow();
-        int len = GetWindowTextLengthW(h);
-        StringBuilder t = new StringBuilder(len + 2);
+        int len = GetWindowTextLengthW(h);        StringBuilder t = new StringBuilder(len + 2);
         GetWindowText(h, t, t.Capacity);
         return "{\"title\":" + J(t.ToString()) + ",\"hwnd\":" + h.ToInt64() + "}";
     }
@@ -347,19 +380,113 @@ public static class HumanInput
         ShowWindow(new IntPtr(hwnd), 9);
         return SetForegroundWindow(new IntPtr(hwnd));
     }
+
+    // ---- 屏幕捕获：把指定矩形存成 PNG ----
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+
+    // 放大截取：把 x,y,w,h 区域放大 zoom 倍后保存，便于精确定位小目标
+    public static string CaptureScaled(int x, int y, int w, int h, int zoom, string path)
+    {
+        if (w <= 0 || h <= 0 || zoom <= 0) { return "ERR: invalid size/zoom"; }
+        IntPtr screenDc = GetDC(IntPtr.Zero);
+        IntPtr memDc = CreateCompatibleDC(screenDc);
+        IntPtr bmp = CreateCompatibleBitmap(screenDc, w, h);
+        IntPtr old = SelectObject(memDc, bmp);
+        try
+        {
+            bool ok = BitBlt(memDc, 0, 0, w, h, screenDc, x, y, 0x00CC0020);
+            if (!ok) { return "ERR: BitBlt failed"; }
+            using (System.Drawing.Bitmap raw = System.Drawing.Image.FromHbitmap(bmp))
+            using (System.Drawing.Bitmap scaled = new System.Drawing.Bitmap(w * zoom, h * zoom, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            {
+                using (System.Drawing.Graphics g = System.Drawing.Graphics.FromImage(scaled))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+                    g.DrawImage(raw, 0, 0, w * zoom, h * zoom);
+                    using (System.Drawing.Pen pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(90, 255, 0, 0), 1))
+                    {
+                        for (int gx = 100; gx < w; gx += 100) g.DrawLine(pen, gx * zoom, 0, gx * zoom, h * zoom);
+                        for (int gy = 100; gy < h; gy += 100) g.DrawLine(pen, 0, gy * zoom, w * zoom, gy * zoom);
+                    }
+                }
+                scaled.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            return "OK " + path + " " + w + "x" + h + " zoom=" + zoom;
+        }
+        finally
+        {
+            SelectObject(memDc, old);
+            DeleteObject(bmp);
+            DeleteDC(memDc);
+            ReleaseDC(IntPtr.Zero, screenDc);
+        }
+    }
+    // ---- DPI 感知：必须在任何坐标读取之前调用 ----
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+    [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+
+    public static string EnableDpiAwareness()
+    {
+        // PER_MONITOR_AWARE_V2 = -4
+        try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return "per-monitor-v2"; } catch { }
+        try { if (SetProcessDpiAwareness(2) == 0) return "per-monitor"; } catch { }
+        try { if (SetProcessDPIAware()) return "system"; } catch { }
+        return "none";
+    }
+
+    public static string Capture(int x, int y, int w, int h, string path)
+    {
+        if (w <= 0 || h <= 0) { return "ERR: invalid size"; }
+        IntPtr screenDc = GetDC(IntPtr.Zero);
+        IntPtr memDc = CreateCompatibleDC(screenDc);
+        IntPtr bmp = CreateCompatibleBitmap(screenDc, w, h);
+        IntPtr old = SelectObject(memDc, bmp);
+        try
+        {
+            bool ok = BitBlt(memDc, 0, 0, w, h, screenDc, x, y, 0x00CC0020); // SRCCOPY
+            if (!ok) { return "ERR: BitBlt failed"; }
+            using (System.Drawing.Bitmap image = System.Drawing.Image.FromHbitmap(bmp))
+            {
+                image.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            return "OK " + path + " " + w + "x" + h;
+        }
+        finally
+        {
+            SelectObject(memDc, old);
+            DeleteObject(bmp);
+            DeleteDC(memDc);
+            ReleaseDC(IntPtr.Zero, screenDc);
+        }
+    }
 }
 '@
+
+try { Add-Type -AssemblyName System.Drawing } catch { }
+
 
 function Emit($obj) {
   Write-Output ($obj | ConvertTo-Json -Compress -Depth 8)
 }
 
+# 启用 DPI 感知（必须早于任何坐标读取），否则高缩放屏幕上坐标会整体偏移
+$dpiMode = [HumanInput]::EnableDpiAwareness()
+
 # Warm up: read once so the desktop handle is validated and the JIT has run.
 [HumanInput]::Read()
-Emit @{ ok = $true; ready = $true; pos = "$([HumanInput]::CX),$([HumanInput]::CY)"; screen = "$([HumanInput]::GetSystemMetrics(0))x$([HumanInput]::GetSystemMetrics(1))" }
+Emit @{ ok = $true; ready = $true; dpi = $dpiMode; pos = "$([HumanInput]::CX),$([HumanInput]::CY)"; screen = "$([HumanInput]::GetSystemMetrics(0))x$([HumanInput]::GetSystemMetrics(1))" }
 
 while ($true) {
-  $line = [Console]::In.ReadLine()
+  $line = if ($script:stdinReader) { $script:stdinReader.ReadLine() } else { [Console]::In.ReadLine() }
   if ($null -eq $line) { break }
   $line = $line.Trim()
   if ($line.Length -eq 0) { continue }
@@ -378,6 +505,10 @@ while ($true) {
     [HumanInput]::ResetEsc()
     switch ($op) {
       "ping" { Emit @{ ok = $true; pong = $true } }
+      "trace" {
+        if ($null -ne $req.enabled) { [HumanInput]::TraceEnabled = [bool]$req.enabled }
+        Emit @{ ok = $true; result = [HumanInput]::GetTrace() }
+      }
       "pos" {
         [HumanInput]::Read()
         Emit @{ ok = $true; result = "$([HumanInput]::CX),$([HumanInput]::CY)" }
@@ -391,7 +522,15 @@ while ($true) {
         if ($r -eq "ESC") { Emit @{ ok = $false; aborted = $true; error = "aborted by ESC" } }
         else { Emit @{ ok = $true; result = $r } }
       }
-      "rmove" {
+      "move_by" {
+        $ms = 300; if ($null -ne $req.ms) { $ms = [int]$req.ms }
+        [HumanInput]::Read()
+        $tx = [HumanInput]::CX + [int]$req.dx
+        $ty = [HumanInput]::CY + [int]$req.dy
+        $r = [HumanInput]::MoveTo($tx, $ty, $ms)
+        if ($r -eq "ESC") { Emit @{ ok = $false; aborted = $true; error = "aborted by ESC" } }
+        else { Emit @{ ok = $true; result = $r } }
+      }      "rmove" {
         $ms = 300; if ($null -ne $req.ms) { $ms = [int]$req.ms }
         [HumanInput]::Read()
         $tx = [HumanInput]::CX + [int]$req.dx
@@ -400,7 +539,18 @@ while ($true) {
         if ($r -eq "ESC") { Emit @{ ok = $false; aborted = $true; error = "aborted by ESC" } }
         else { Emit @{ ok = $true; result = $r } }
       }
-      "click" {
+      "click_at" {
+        $ms = 320; if ($null -ne $req.ms) { $ms = [int]$req.ms }
+        $btn = "left"; if ($null -ne $req.button) { $btn = [string]$req.button }
+        $cnt = 1; if ($null -ne $req.count) { $cnt = [int]$req.count }
+        $r = [HumanInput]::MoveTo([int]$req.x, [int]$req.y, $ms)
+        if ($r -eq "ESC") { Emit @{ ok = $false; aborted = $true; error = "aborted by ESC" } }
+        else {
+          Start-Sleep -Milliseconds 90
+          [HumanInput]::Click($btn, $cnt)
+          Emit @{ ok = $true; result = "clicked $btn x$cnt at $r" }
+        }
+      }      "click" {
         $btn = "left"; if ($null -ne $req.button) { $btn = [string]$req.button }
         $cnt = 1; if ($null -ne $req.count) { $cnt = [int]$req.count }
         [HumanInput]::Click($btn, $cnt)
@@ -455,6 +605,41 @@ while ($true) {
         $ok = [HumanInput]::Focus([long]$req.hwnd)
         Start-Sleep -Milliseconds 140
         Emit @{ ok = $true; result = $ok }
+      }
+      "capture" {
+        Add-Type -AssemblyName System.Drawing
+        $path = [string]$req.path
+        if ([string]::IsNullOrWhiteSpace($path)) { Emit @{ ok = $false; error = "capture 需要 path" } }
+        else {
+          $x = 0; if ($null -ne $req.x) { $x = [int]$req.x }
+          $y = 0; if ($null -ne $req.y) { $y = [int]$req.y }
+          $w = [HumanInput]::GetSystemMetrics(0); if ($null -ne $req.w) { $w = [int]$req.w }
+          $h = [HumanInput]::GetSystemMetrics(1); if ($null -ne $req.h) { $h = [int]$req.h }
+          $dir = Split-Path -Parent $path
+          if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+          $zoom = 1; if ($null -ne $req.zoom) { $zoom = [int]$req.zoom }
+          if ($zoom -gt 1) { $r = [HumanInput]::CaptureScaled($x, $y, $w, $h, $zoom, $path) }
+          else { $r = [HumanInput]::Capture($x, $y, $w, $h, $path) }
+          if ($r.StartsWith("OK")) { Emit @{ ok = $true; result = @{ path = $path; width = $w; height = $h; zoom = $zoom } } }
+          else { Emit @{ ok = $false; error = $r } }
+        }
+      }
+      "wait_window" {
+        $pattern = [string]$req.title
+        $timeout = 15000; if ($null -ne $req.timeout) { $timeout = [int]$req.timeout }
+        $deadline = (Get-Date).AddMilliseconds($timeout)
+        $found = $false
+        $matched = ""
+        while ((Get-Date) -lt $deadline) {
+          $wins = [HumanInput]::Windows() | ConvertFrom-Json
+          foreach ($w in $wins) {
+            if ($w.title -like "*$pattern*") { $found = $true; $matched = $w.title; break }
+          }
+          if ($found) { break }
+          Start-Sleep -Milliseconds 250
+        }
+        if ($found) { Emit @{ ok = $true; result = @{ matched = $matched; waited = $true } } }
+        else { Emit @{ ok = $false; error = "window not found within ${timeout}ms: $pattern" } }
       }
       "wait" {
         $ms = 200; if ($null -ne $req.ms) { $ms = [int]$req.ms }

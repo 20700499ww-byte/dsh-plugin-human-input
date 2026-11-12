@@ -252,6 +252,13 @@ function wrap(raw) {
   }
 }
 
+/** 读取 PNG 的宽高（IHDR 固定在第 16..24 字节），失败返回 null */
+function pngSize(buf) {
+  if (!buf || buf.length < 24) return null
+  if (buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) return null
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
+}
+
 export function apply(ctx, config = {}) {
   const scriptPath = fileURLToPath(new URL(DRIVER_RELATIVE, import.meta.url))
   const speed = Number(config.speed ?? 1)
@@ -280,7 +287,7 @@ export function apply(ctx, config = {}) {
       properties: {
         action: {
           type: 'string',
-          enum: ['move', 'move_by', 'click', 'press', 'release', 'drag', 'scroll', 'pos', 'screen'],
+          enum: ['move', 'move_by', 'click', 'click_at', 'press', 'release', 'drag', 'scroll', 'pos', 'screen'],
           description: '要执行的指针动作',
         },
         x: { type: 'number', description: 'move 的目标 X（屏幕像素）' },
@@ -323,6 +330,16 @@ export function apply(ctx, config = {}) {
           return call({ op: 'rmove', dx: args.dx ?? 0, dy: args.dy ?? 0, ms: scale(args.durationMs, 300) })
         case 'click':
           return call({ op: 'click', button: args.button ?? 'left', count: args.count ?? 1 })
+        case 'click_at':
+          if (args.x == null || args.y == null) throw new Error('click_at 需要 x 和 y')
+          return call({
+            op: 'click_at',
+            x: args.x,
+            y: args.y,
+            button: args.button ?? 'left',
+            count: args.count ?? 1,
+            ms: scale(args.durationMs, 320),
+          })
         case 'press':
           return call({ op: 'down', button: args.button ?? 'left' })
         case 'release':
@@ -460,6 +477,9 @@ export function apply(ctx, config = {}) {
               text: { type: 'string' },
               delay: { type: 'integer' },
               ms: { type: 'integer' },
+              hwnd: { type: 'number' },
+              title: { type: 'string' },
+              timeout: { type: 'integer' },
             },
           },
         },
@@ -484,6 +504,12 @@ export function apply(ctx, config = {}) {
             break
           case 'click':
             req = { op: 'click', button: step.button ?? 'left', count: step.count ?? 1 }
+            break
+          case 'click_at':
+            req = { op: 'click_at', x: step.x, y: step.y, button: step.button ?? 'left', count: step.count ?? 1, ms: scale(step.ms, 320) }
+            break
+          case 'wait_window':
+            req = { op: 'wait_window', title: step.title, timeout: step.timeout ?? 15000 }
             break
           case 'press':
             req = { op: 'down', button: step.button ?? 'left' }
@@ -515,6 +541,9 @@ export function apply(ctx, config = {}) {
           case 'wait':
             req = { op: 'wait', ms: step.ms ?? 200 }
             break
+          case 'focus':
+            req = { op: 'focus', hwnd: step.hwnd }
+            break
           default:
             throw new Error(`第 ${done.length + 1} 步 op 未知：${op}`)
         }
@@ -530,6 +559,119 @@ export function apply(ctx, config = {}) {
       return { ok: true, result: { steps: done.length, executed: done } }
     },
   })
+
+  // ------------------------------------------------------------------
+  // 5) 截图：让模型「看见」屏幕（可选；依赖 attachments 服务）
+  // ------------------------------------------------------------------
+  const attachments = ctx.get ? ctx.get('attachments') : ctx.attachments
+  if (attachments && typeof attachments.saveImage === 'function') {
+    ctx.tools.register({
+      name: 'human_screenshot',
+      description:
+        '截图并把图像直接返回给你看（不是只给路径）。用于操作后确认结果：点完按钮、页面加载完，截一张看看对不对。' +
+        '默认截全屏；也可以给 x/y/width/height 只截一块区域。' +
+        '要精确点击小目标（图标、标签、菜单项）时，先截一小块并把 zoom 设为 3~6 —— 放大图带 100px 网格，' +
+        '能直接读出屏幕坐标，比在全屏图上估坐标准得多。返回值同时带坐标换算说明。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          x: { type: 'integer', description: '截取区域左上角 X（默认 0）' },
+          y: { type: 'integer', description: '截取区域左上角 Y（默认 0）' },
+          width: { type: 'integer', description: '截取宽度（默认全屏宽）' },
+          height: { type: 'integer', description: '截取高度（默认全屏高）' },
+          zoom: {
+            type: 'integer',
+            description: '放大倍数，1=原尺寸（默认），3~6 适合精确定位小目标；放大图带红色 100px 网格',
+          },
+          label: { type: 'string', description: '给这张图起个名字，便于识别，例如 "after-click"' },
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            path: { type: 'string' },
+            width: { type: 'integer' },
+            height: { type: 'integer' },
+            originX: { type: 'integer' },
+            originY: { type: 'integer' },
+            zoom: { type: 'integer' },
+            image: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                attachmentId: { type: 'string' },
+                mediaType: { type: 'string' },
+                bytes: { type: 'integer' },
+                width: { type: 'integer' },
+                height: { type: 'integer' },
+                name: { type: 'string' },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const zoom = value.zoom ?? 1
+          const hint =
+            zoom > 1
+              ? `The image is magnified ${zoom}x with a red grid every 100 screen pixels. ` +
+                `Divide any measured image coordinate by ${zoom}, then add (${value.originX},${value.originY}) to get the screen pixel.`
+              : `Coordinates in this image map 1:1 to screen pixels: add (${value.originX},${value.originY}).`
+          return [
+            { type: 'text', text: `Screen region ${value.width}x${value.height} at (${value.originX},${value.originY}). ${hint}` },
+            { type: 'image', attachment: value.image },
+          ]
+        },
+      },
+      isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        const { mkdtempSync, readFileSync, rmSync } = await import('node:fs')
+        const { tmpdir } = await import('node:os')
+        const { join } = await import('node:path')
+
+        const dir = mkdtempSync(join(tmpdir(), 'dsh-shot-'))
+        const file = join(dir, 'shot.png')
+        try {
+          const dims = await driver.request({ op: 'screen' }, 15000)
+          const sw = Number(dims?.result?.width ?? 0)
+          const sh = Number(dims?.result?.height ?? 0)
+          const x = Number(args.x ?? 0)
+          const y = Number(args.y ?? 0)
+          const w = Number(args.width ?? sw ?? 0)
+          const h = Number(args.height ?? sh ?? 0)
+          const zoom = Math.max(1, Math.min(8, Number(args.zoom ?? 1) || 1))
+          if (!w || !h) throw new Error('无法确定截图尺寸（screen 返回异常）')
+
+          const res = await driver.request({ op: 'capture', path: file, x, y, w, h, zoom }, 45000)
+          if (res?.ok === false) throw new Error(res.error ?? 'capture failed')
+
+          const buf = readFileSync(file)
+          const size = pngSize(buf) ?? { width: w * zoom, height: h * zoom }
+          const ref = await attachments.saveImage({
+            data: new Uint8Array(buf),
+            mediaType: 'image/png',
+            name: args.label ? `${args.label}.png` : 'screenshot.png',
+          })
+
+          return {
+            path: file,
+            width: w,
+            height: h,
+            originX: x,
+            originY: y,
+            zoom,
+            image: ref,
+          }
+        } finally {
+          try {
+            rmSync(dir, { recursive: true, force: true })
+          } catch {}
+        }
+      },
+    })
+  }
 
   // 生命周期：插件卸载时关掉常驻驱动，避免留下孤儿进程
   if (typeof ctx.effect === 'function') {
