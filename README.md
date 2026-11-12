@@ -164,6 +164,12 @@ scripts/human-input-driver.ps1  常驻驱动（PowerShell + Win32）
 
 - [赞赏与支持](SPONSOR.md) —— 如果它帮到了你
 
+---
+
+<div align="center">
+<sub>用着顺手的话，点个 ⭐ 收藏 —— 那是我继续更新的动力。</sub>
+</div>
+
 ## License
 
 MIT
