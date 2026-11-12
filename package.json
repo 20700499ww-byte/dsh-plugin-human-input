@@ -1,0 +1,56 @@
+{
+  "name": "dsh-plugin-human-input",
+  "version": "0.1.0",
+  "description": "Human-like mouse and keyboard control for DSH: gradual eased cursor movement, press/release, drag, per-character typing. No screenshot-guessing.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "scripts/human-input-driver.ps1",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-bundle",
+    "deepseek-harness",
+    "plugin",
+    "computer-use",
+    "mouse",
+    "keyboard",
+    "automation"
+  ],
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.0-rc.5 <0.3.0"
+  },
+  "os": [
+    "win32"
+  ],
+  "license": "MIT",
+  "author": "20700499ww-byte",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/20700499ww-byte/dsh-plugin-human-input.git"
+  },
+  "homepage": "https://github.com/20700499ww-byte/dsh-plugin-human-input#readme",
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

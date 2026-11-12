@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Human Input",
+    "description": "Lets the agent drive the mouse and keyboard like a person: gradual eased cursor movement, press and release, drag, and per-character typing instead of screenshot-guessing."
+  }
+}

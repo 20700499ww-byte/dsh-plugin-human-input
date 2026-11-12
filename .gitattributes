@@ -1,0 +1,9 @@
+# 统一换行符
+* text=auto eol=lf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.exe binary
