@@ -1,29 +1,29 @@
 <div align="center">
 
-<img src="docs/reward-qr.jpg" alt="赞赏码 · 微信 / 支付宝扫码" width="380" />
+<img src="docs/reward-qr.jpg" alt="Tip jar · WeChat / Alipay QR" width="380" />
 
-<sub>微信 / 支付宝 扫码 · 金额随意 · 心意到就好</sub>
-
----
-
-# 赞赏与支持
-
-**如果这个插件帮你省下了时间，可以请作者喝杯咖啡。**
+<sub>WeChat / Alipay · any amount · whatever feels right</sub>
 
 ---
 
-### 关于「收藏」这件事
+# Sponsor & support
 
-说实话，码不是白放的——你能扫，我很感激；
-但**更让我有动力继续维护的，是看到这个仓库被更多人收藏**。
+**If this plugin saved you some time, you can buy the author a coffee.**
 
-因为赞是即时的、一次性的；
-而收藏意味着「我以后还会回来用」——
-那才是我熬夜改 bug、反复测试轨迹平滑度的理由。
+---
 
-如果暂时不想打赏，完全没关系。
-**点一下右上角的 ⭐ Star / 收藏，对我来说分量是一样的。**
+### About starring
 
-<sub>—— 每一次收藏，都会变成下一次更新的动力</sub>
+Honestly, the QR code isn't there for nothing — if you scan it, thank you.
+But **what keeps me maintaining this repo is seeing more people star it.**
+
+Stars are instant and one-off;
+a star means "I'll come back to this" —
+and that's the reason I stay up fixing bugs and re-testing trajectory smoothness.
+
+If you'd rather not tip, that's completely fine.
+**Clicking ⭐ Star in the top right means just as much to me.**
+
+<sub>— every star turns into the next update</sub>
 
 </div>
