@@ -1,10 +1,10 @@
 # dsh-plugin-human-input
 
-An agent that drives this Windows machine the way a person would: nudging the cursor across the screen, pressing and releasing, dragging, typing one character at a time — then taking a screenshot to see how it went.
+让 Agent 像人一样操控这台 Windows 电脑：鼠标一步一步挪过去，按下抬起，拖拽，键盘一个字一个字敲，完了还能截图看一眼结果。
 
-**Not** the "screenshot → let the model guess coordinates → teleport the pointer → click" routine. Every step here is an input primitive you can arrange, interrupt, and verify.
+**不是**「截图 → 让模型猜坐标 → 一次性瞬移点击」那一套。这里每一步都是可编排、可中断、可验证的输入原语。
 
-> Third-party plugin, built on DeepSeek Harness. Not an official project.
+> 第三方插件，built on DeepSeek Harness，非官方项目。
 
 ## Why not screenshot-based positioning
 
