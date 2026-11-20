@@ -1,10 +1,10 @@
 # dsh-plugin-human-input
 
-让 Agent 像人一样操控这台 Windows 电脑：鼠标一步一步挪过去，按下抬起，拖拽，键盘一个字一个字敲，完了还能截图看一眼结果。
+Let an agent drive this Windows machine the way a person does: the cursor moves one step at a time, presses and releases, drags, and the keyboard types one character at a time — then it screenshots to check the result.
 
-**不是**「截图 → 让模型猜坐标 → 一次性瞬移点击」那一套。这里每一步都是可编排、可中断、可验证的输入原语。
+**Not** the "screenshot → let the model guess coordinates → teleport-click in one shot" approach. Every step here is a scriptable, interruptible, verifiable input primitive.
 
-> 第三方插件，built on DeepSeek Harness，非官方项目。
+> Third-party plugin, built on DeepSeek Harness; not an official project.
 
 ## Why not screenshot-based positioning
 
@@ -75,15 +75,15 @@ human_screenshot { x: 600, y: 300, width: 200, height: 150, zoom: 4 }  // magnif
 
 With `zoom`, the image gets a red grid line every 100 screen pixels. That's how you hit a small icon, tab or menu item on the first try.
 
-## 安装
+## Install
 
 ```bash
-dsh plugin --profile <你的profile> add github:20700499ww-byte/dsh-plugin-human-input
+dsh plugin --profile <your-profile> add github:20700499ww-byte/dsh-plugin-human-input
 ```
 
-也可以从插件市场索引装，Discover 里搜 **Human Input**。
+You can also install it from the plugin-market index — search **Human Input** in Discover.
 
-装完跑 `dsh --profile <你的profile> --dump-config`，能看到 `# == dsh-plugin-human-input` 这一层。
+After installing, run `dsh --profile <your-profile> --dump-config`; you should see a `# == dsh-plugin-human-input` layer.
 
 ## How it works
 
