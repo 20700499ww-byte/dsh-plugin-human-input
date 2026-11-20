@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Human Input — human-like mouse &amp; keyboard control for Windows agents</title>
+<meta name="description" content="A DeepSeek Harness plugin that gives agents real Windows input primitives: eased cursor paths with arc and jitter, press/release, drag, per-character typing, and grid-overlay screenshots to verify the result." />
+<meta name="author" content="20700499ww-byte" />
+<meta name="theme-color" content="#0d1117" />
+
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Human Input — human-like mouse &amp; keyboard control for Windows" />
+<meta property="og:description" content="Eased cursor paths, real press/release, drag, per-character typing, and screenshots the model can read. Built for DeepSeek Harness." />
+<meta property="og:image" content="https://20700499ww-byte.github.io/dsh-plugin-human-input/icon.svg" />
+<meta property="og:url" content="https://20700499ww-byte.github.io/dsh-plugin-human-input/" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14;
+    --bg-soft: #111823;
+    --panel: #131b26;
+    --line: #22303f;
+    --text: #e6edf3;
+    --muted: #93a4b8;
+    --dim: #64748b;
+    --blue: #1f6feb;
+    --teal: #38a3a5;
+    --green: #2ea043;
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 12% -8%, rgba(31,111,235,.20), transparent 60%),
+      radial-gradient(900px 500px at 88% 0%, rgba(56,163,165,.14), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: #79b8ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { width: min(1120px, calc(100% - 44px)); margin: 0 auto; }
+
+  /* ---------- header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(12px);
+    background: rgba(11,15,20,.82);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 18px; height: 62px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; color: var(--text); }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; }
+  .nav-links { margin-left: auto; display: flex; gap: 22px; font-size: 14.5px; }
+  .nav-links a { color: var(--muted); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .gh-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 14px; border: 1px solid var(--line); border-radius: 9px;
+    color: var(--text) !important; font-size: 14px; background: var(--panel);
+    transition: border-color .18s, transform .18s;
+  }
+  .gh-btn:hover { border-color: #3d5a7a; transform: translateY(-1px); text-decoration: none; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 88px 0 64px; }
+  .hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 56px; align-items: center; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 12px; border: 1px solid #24405e; border-radius: 999px;
+    background: rgba(31,111,235,.10); color: #9ec5ff;
+    font-size: 12.5px; font-weight: 550; letter-spacing: .02em;
+  }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  h1 {
+    margin: 20px 0 0;
+    font-size: clamp(34px, 4.6vw, 56px);
+    line-height: 1.08;
+    letter-spacing: -.035em;
+    font-weight: 750;
+  }
+  h1 .grad {
+    background: linear-gradient(100deg, #79b8ff 10%, #38a3a5 90%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lede { margin: 22px 0 0; font-size: 18px; color: var(--muted); max-width: 60ch; }
+  .lede strong { color: var(--text); font-weight: 600; }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 12px 20px; border-radius: 10px; font-size: 15px; font-weight: 600;
+    border: 1px solid transparent; transition: transform .16s, box-shadow .16s, background .16s;
+  }
+  .btn:hover { transform: translateY(-2px); text-decoration: none; }
+  .btn-primary { background: linear-gradient(100deg, var(--blue), #2f8f9d); color: #fff; box-shadow: 0 10px 26px -12px rgba(31,111,235,.9); }
+  .btn-ghost { border-color: var(--line); background: var(--panel); color: var(--text); }
+  .btn-ghost:hover { border-color: #3d5a7a; }
+
+  .install {
+    margin-top: 26px;
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 13px 15px;
+    background: #0a0e13; border: 1px solid var(--line); border-radius: 11px;
+    overflow-x: auto;
+  }
+  .install .lbl { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .install code { font-family: var(--mono); font-size: 13px; color: #cbd5e1; white-space: nowrap; }
+
+  /* ---------- trajectory card ---------- */
+  .card {
+    background: linear-gradient(180deg, var(--panel), #0f1620);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px;
+    box-shadow: 0 30px 70px -40px rgba(0,0,0,.95);
+  }
+  .card h4 { margin: 0 0 2px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .card .sub { font-size: 12.5px; color: var(--dim); font-family: var(--mono); }
+  svg.traj { width: 100%; height: auto; display: block; margin-top: 6px; }
+  .legend { display: flex; gap: 18px; margin-top: 12px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+  /* ---------- sections ---------- */
+  section { padding: 66px 0; border-top: 1px solid var(--line); }
+  .sec-head { max-width: 66ch; margin-bottom: 38px; }
+  .sec-head .kicker { font-size: 12.5px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: var(--teal); }
+  .sec-head h2 { margin: 10px 0 0; font-size: clamp(25px, 3.1vw, 35px); letter-spacing: -.025em; line-height: 1.2; font-weight: 700; }
+  .sec-head p { margin: 14px 0 0; color: var(--muted); font-size: 16.5px; }
+
+  .cols-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .cols-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+
+  .feature { padding: 22px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius); }
+  .feature .ico {
+    width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+    background: rgba(31,111,235,.14); border: 1px solid #24405e; margin-bottom: 14px;
+  }
+  .feature h3 { margin: 0 0 8px; font-size: 16.5px; letter-spacing: -.01em; }
+  .feature p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .feature code { font-family: var(--mono); font-size: .92em; color: #a5d6ff; background: rgba(110,118,129,.12); padding: 1px 5px; border-radius: 4px; }
+
+  /* ---------- tools table ---------- */
+  .tool { background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
+  .tool > summary {
+    display: flex; align-items: center; gap: 13px;
+    padding: 17px 20px; cursor: pointer; list-style: none; font-weight: 600;
+  }
+  .tool > summary::-webkit-details-marker { display: none; }
+  .tool > summary:hover { background: rgba(255,255,255,.02); }
+  .tool .tname { font-family: var(--mono); font-size: 14.5px; color: #a5d6ff; }
+  .tool .tdesc { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 2px; }
+  .tool .chev { margin-left: auto; color: var(--dim); transition: transform .2s; font-size: 12px; }
+  .tool[open] .chev { transform: rotate(90deg); }
+  .tool .body { padding: 0 20px 20px; border-top: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 14px; }
+  th { text-align: left; color: var(--dim); font-weight: 600; font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid rgba(34,48,63,.55); color: var(--muted); vertical-align: top; }
+  td:first-child { font-family: var(--mono); color: #a5d6ff; white-space: nowrap; font-size: 13.5px; }
+  td:first-child code { white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+
+  pre {
+    margin: 14px 0 0; padding: 15px 17px; overflow-x: auto;
+    background: #080b10; border: 1px solid var(--line); border-radius: 10px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.62; color: #cbd5e1;
+  }
+  pre .c { color: #5c7089; }
+  pre .k { color: #ff7b72; }
+  pre .s { color: #a5d6ff; }
+  pre .n { color: #79c0ff; }
+
+  /* ---------- metrics ---------- */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .metric { padding: 22px 20px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius); }
+  .metric .v { font-size: 30px; font-weight: 720; letter-spacing: -.03em; line-height: 1; background: linear-gradient(100deg,#79b8ff,#38a3a5); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .metric .v small { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+  .metric .l { margin-top: 9px; font-size: 13.5px; color: var(--muted); }
+
+  /* ---------- limitations ---------- */
+  .limits { display: grid; gap: 12px; }
+  .limit { display: flex; gap: 13px; padding: 15px 18px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 11px; }
+  .limit .mark { color: #f0883e; font-weight: 700; flex: none; }
+  .limit b { color: var(--text); font-weight: 600; }
+  .limit span { color: var(--muted); font-size: 14.5px; }
+
+  /* ---------- footer ---------- */
+  footer { padding: 46px 0 60px; border-top: 1px solid var(--line); color: var(--dim); font-size: 14px; }
+  .foot-grid { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between; }
+  .foot-links { display: flex; gap: 20px; flex-wrap: wrap; }
+
+  @media (max-width: 940px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    .cols-3, .cols-2 { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .nav-links { display: none; }
+  }
+  @media (max-width: 560px) {
+    .hero { padding: 56px 0 40px; }
+    section { padding: 48px 0; }
+    .metrics { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top"><img src="icon.svg" alt="" /> Human Input</a>
+    <nav class="nav-links">
+      <a href="#why">Why</a>
+      <a href="#tools">Tools</a>
+      <a href="#how">How it works</a>
+      <a href="#results">Results</a>
+      <a href="#limits">Limits</a>
+    </nav>
+    <a class="gh-btn" href="https://github.com/20700499ww-byte/dsh-plugin-human-input">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <div class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow"><span class="dot"></span> v0.4.0 · DeepSeek Harness plugin</span>
+        <h1>The pointer should <span class="grad">travel</span>,<br />not teleport.</h1>
+        <p class="lede">
+          Most computer-use agents screenshot the screen, guess a coordinate, then jump the cursor there.
+          Human Input gives the model <strong>real Windows input primitives</strong> instead — eased cursor
+          paths with an arc and a little jitter, genuine press and release, drag, per-character typing,
+          and screenshots it can measure.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#install">Install in one command</a>
+          <a class="btn btn-ghost" href="https://github.com/20700499ww-byte/dsh-plugin-human-input">Read the source</a>
+        </div>
+        <div class="install" id="install">
+          <span class="lbl">Install with one command</span>
+          <code>dsh plugin --profile &lt;your-profile&gt; add github:20700499ww-byte/dsh-plugin-human-input</code>
+        </div>
+      </div>
+
+      <div class="card" aria-label="Cursor trajectory comparison">
+        <h4>Cursor path</h4>
+        <div class="sub">straight teleport vs. eased Bezier with jitter</div>
+        <svg class="traj" viewBox="0 0 320 210" role="img" aria-label="Two paths from start to target: a straight dotted line and a curved eased path with sampled dots">
+          <defs>
+            <linearGradient id="pg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#38a3a5"/><stop offset="1" stop-color="#79b8ff"/>
+            </linearGradient>
+          </defs>
+          <g stroke="#1c2a3a" stroke-width="1">
+            <line x1="0" y1="52" x2="320" y2="52"/><line x1="0" y1="105" x2="320" y2="105"/><line x1="0" y1="158" x2="320" y2="158"/>
+            <line x1="80" y1="0" x2="80" y2="210"/><line x1="160" y1="0" x2="160" y2="210"/><line x1="240" y1="0" x2="240" y2="210"/>
+          </g>
+          <!-- teleport -->
+          <line x1="42" y1="168" x2="278" y2="48" stroke="#3d5a7a" stroke-width="1.6" stroke-dasharray="4 6" opacity=".85"/>
+          <!-- eased bezier path -->
+          <path d="M42 168 C 96 176, 132 128, 176 96 S 240 52, 278 48" fill="none" stroke="url(#pg)" stroke-width="2.6" stroke-linecap="round"/>
+          <!-- sampled dots along the curve -->
+          <g fill="#9ec5ff">
+            <circle cx="42" cy="168" r="3.4"/><circle cx="60" cy="170.5" r="2.4"/>
+            <circle cx="78" cy="171" r="2.2"/><circle cx="96" cy="168" r="2.2"/>
+            <circle cx="114" cy="160" r="2.2"/><circle cx="132" cy="148" r="2.2"/>
+            <circle cx="150" cy="133" r="2.2"/><circle cx="168" cy="116" r="2.2"/>
+            <circle cx="188" cy="96" r="2.2"/><circle cx="208" cy="78" r="2.2"/>
+            <circle cx="230" cy="63" r="2.2"/><circle cx="252" cy="53" r="2.2"/>
+          </g>
+          <circle cx="278" cy="48" r="5.5" fill="none" stroke="#38a3a5" stroke-width="2"/>
+          <circle cx="278" cy="48" r="1.8" fill="#38a3a5"/>
+          <text x="42" y="196" fill="#64748b" font-size="10" font-family="ui-monospace, monospace">start</text>
+          <text x="252" y="196" fill="#64748b" font-size="10" font-family="ui-monospace, monospace">target</text>
+        </svg>
+        <div class="legend">
+          <span><i style="background:#38a3a5"></i>easeInOutCubic + arc</span>
+          <span><i style="background:#3d5a7a"></i>teleport</span>
+          <span><i style="background:#9ec5ff"></i>11 px max step</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ WHY ============ -->
+  <section id="why">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">The problem</div>
+        <h2>Screenshot-guess-click is slow, and it misses.</h2>
+        <p>
+          A vision model reading a 1920×1080 screenshot localises a target to maybe ±10 pixels. That is fine
+          for a big button and fatal for a 16 px toolbar icon. Worse, a teleporting cursor simply is not
+          accepted by a lot of software.
+        </p>
+      </div>
+
+      <div class="cols-3">
+        <div class="feature">
+          <div class="ico" aria-hidden="true">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#79b8ff" stroke-width="1.9" stroke-linecap="round"><path d="M4 20 20 4"/><path d="M4 4h6M4 4v6"/></svg>
+          </div>
+          <h3>Teleports break apps</h3>
+          <p>Drawing tools draw a straight line across the canvas. Drag-and-drop never receives the intermediate <code>mousemove</code> events. Games and remote desktops see physically impossible motion.</p>
+        </div>
+        <div class="feature">
+          <div class="ico" aria-hidden="true">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#79b8ff" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </div>
+          <h3>Every step costs inference</h3>
+          <p>Screenshot, infer, act, screenshot, infer. A ten-step form becomes twenty model round trips. Input primitives can be batched into one <code>human_script</code> call.</p>
+        </div>
+        <div class="feature">
+          <div class="ico" aria-hidden="true">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#79b8ff" stroke-width="1.9" stroke-linecap="round"><path d="M3 17l5-5 4 4 8-9"/><path d="M20 7h-4M20 7v4"/></svg>
+          </div>
+          <h3>No correction loop</h3>
+          <p>Without seeing the result, the agent cannot tell whether the click landed. <code>human_screenshot</code> returns the actual image with a measurable grid.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TOOLS ============ -->
+  <section id="tools">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">The surface</div>
+        <h2>Five tools, twenty-eight actions.</h2>
+        <p>Small enough to fit in a model's context, complete enough to drive a real desktop session.</p>
+      </div>
+
+      <details class="tool" open>
+        <summary>
+          <span class="tname">human_pointer</span>
+          <span class="tdesc">— the mouse</span>
+          <span class="chev">▶</span>
+        </summary>
+        <div class="body">
+          <table>
+            <thead><tr><th>action</th><th>what it does</th></tr></thead>
+            <tbody>
+              <tr><td>move</td><td>Travel to absolute screen coordinates along an eased, bowed path</td></tr>
+              <tr><td>move_by</td><td>Relative move — call it repeatedly for "nudge it over step by step"</td></tr>
+              <tr><td>click</td><td>Single, double, right or middle click</td></tr>
+              <tr><td>click_at</td><td>Move and click in one call — one round trip fewer</td></tr>
+              <tr><td>press / release</td><td>Hold a button down, let it go; combine for any hold duration</td></tr>
+              <tr><td>drag</td><td>Press at A, travel to B, release — eased the whole way</td></tr>
+              <tr><td>scroll</td><td>Wheel, with randomised intervals between notches</td></tr>
+              <tr><td>pos / screen</td><td>Read the cursor position / the screen size</td></tr>
+            </tbody>
+          </table>
+          <pre><span class="c">// travel, then click where you arrived</span>
+human_pointer { <span class="k">action</span>: <span class="s">"move"</span>, <span class="k">x</span>: <span class="n">640</span>, <span class="k">y</span>: <span class="n">360</span>, <span class="k">durationMs</span>: <span class="n">600</span> }
+human_pointer { <span class="k">action</span>: <span class="s">"drag"</span>, <span class="k">from</span>: { <span class="k">x</span>: <span class="n">200</span>, <span class="k">y</span>: <span class="n">200</span> }, <span class="k">to</span>: { <span class="k">x</span>: <span class="n">900</span>, <span class="k">y</span>: <span class="n">600</span> } }</pre>
+        </div>
+      </details>
+
+      <details class="tool">
+        <summary>
+          <span class="tname">human_keyboard</span>
+          <span class="tdesc">— the keyboard</span>
+          <span class="chev">▶</span>
+        </summary>
+        <div class="body">
+          <pre><span class="c">// per-character typing, CJK included, randomised gaps</span>
+human_keyboard { <span class="k">action</span>: <span class="s">"type"</span>, <span class="k">text</span>: <span class="s">"hello, 世界"</span>, <span class="k">delayMs</span>: <span class="n">40</span> }
+
+<span class="c">// key combinations</span>
+human_keyboard { <span class="k">action</span>: <span class="s">"key"</span>, <span class="k">combo</span>: <span class="s">"ctrl+shift+esc"</span> }</pre>
+          <p style="color:var(--muted);font-size:14.5px;margin:14px 0 0">
+            Accepts <code>ctrl</code>, <code>shift</code>, <code>alt</code>, <code>win</code>, <code>enter</code>,
+            <code>tab</code>, <code>esc</code>, <code>f1</code>–<code>f12</code>, arrows, <code>pageup</code>/<code>pagedown</code>,
+            letters, digits and punctuation.
+          </p>
+        </div>
+      </details>
+
+      <details class="tool">
+        <summary>
+          <span class="tname">human_window</span>
+          <span class="tdesc">— window awareness, no screenshot</span>
+          <span class="chev">▶</span>
+        </summary>
+        <div class="body">
+          <pre>human_window { <span class="k">action</span>: <span class="s">"list"</span> }                     <span class="c">// title, rect, hwnd, pid</span>
+human_window { <span class="k">action</span>: <span class="s">"list"</span>, <span class="k">filter</span>: <span class="s">"chrome"</span> }  <span class="c">// title substring</span>
+human_window { <span class="k">action</span>: <span class="s">"active"</span> }                   <span class="c">// foreground window</span>
+human_window { <span class="k">action</span>: <span class="s">"focus"</span>, <span class="k">hwnd</span>: <span class="n">393530</span> }       <span class="c">// bring to front</span></pre>
+        </div>
+      </details>
+
+      <details class="tool">
+        <summary>
+          <span class="tname">human_script</span>
+          <span class="tdesc">— a whole gesture in one call</span>
+          <span class="chev">▶</span>
+        </summary>
+        <div class="body">
+          <table>
+            <thead><tr><th>op</th><th>notes</th></tr></thead>
+            <tbody>
+              <tr><td>move · move_by</td><td><code>x,y</code> / <code>dx,dy</code>, optional <code>ms</code></td></tr>
+              <tr><td>click · click_at</td><td><code>button</code>, <code>count</code></td></tr>
+              <tr><td>press · release</td><td>Hold and release any button</td></tr>
+              <tr><td>drag</td><td><code>from</code>, <code>to</code>, optional <code>ms</code></td></tr>
+              <tr><td>scroll · key · type</td><td><code>clicks</code> / <code>combo</code> / <code>text</code>, <code>delay</code></td></tr>
+              <tr><td>wait · wait_window · focus</td><td>Pause, wait for a window title, focus an <code>hwnd</code></td></tr>
+            </tbody>
+          </table>
+          <pre><span class="c">// dryRun validates every step without moving anything</span>
+{
+  <span class="k">"dryRun"</span>: <span class="n">true</span>,
+  <span class="k">"steps"</span>: [
+    { <span class="k">"op"</span>: <span class="s">"move"</span>, <span class="k">"x"</span>: <span class="n">400</span>, <span class="k">"y"</span>: <span class="n">300</span>, <span class="k">"ms"</span>: <span class="n">450</span> },
+    { <span class="k">"op"</span>: <span class="s">"press"</span> },
+    { <span class="k">"op"</span>: <span class="s">"move"</span>, <span class="k">"x"</span>: <span class="n">700</span>, <span class="k">"y"</span>: <span class="n">500</span>, <span class="k">"ms"</span>: <span class="n">700</span> },
+    { <span class="k">"op"</span>: <span class="s">"release"</span> }
+  ]
+}</pre>
+        </div>
+      </details>
+
+      <details class="tool">
+        <summary>
+          <span class="tname">human_screenshot</span>
+          <span class="tdesc">— letting the model see</span>
+          <span class="chev">▶</span>
+        </summary>
+        <div class="body">
+          <p style="color:var(--muted);font-size:14.5px;margin:14px 0 0">
+            Returns the image itself, not a path. With <code>zoom</code>, a red grid line is drawn every
+            100 <em>screen</em> pixels — measure in the image, divide by the zoom factor, add the region
+            origin, and you have an exact screen coordinate.
+          </p>
+          <pre>human_screenshot { }                                                  <span class="c">// full screen</span>
+human_screenshot { <span class="k">x</span>: <span class="n">600</span>, <span class="k">y</span>: <span class="n">300</span>, <span class="k">width</span>: <span class="n">200</span>, <span class="k">height</span>: <span class="n">150</span> }       <span class="c">// region</span>
+human_screenshot { <span class="k">x</span>: <span class="n">600</span>, <span class="k">y</span>: <span class="n">300</span>, <span class="k">width</span>: <span class="n">200</span>, <span class="k">height</span>: <span class="n">150</span>, <span class="k">zoom</span>: <span class="n">4</span> }  <span class="c">// magnified + grid</span></pre>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============ HOW ============ -->
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Under the hood</div>
+        <h2>One resident process, real Win32 events.</h2>
+        <p>
+          The plugin is two files. <code>index.js</code> registers the tools and speaks one-line JSON to a
+          long-lived PowerShell process; that process owns the actual <code>user32.dll</code> calls.
+        </p>
+      </div>
+
+      <div class="cols-2">
+        <div class="feature">
+          <h3>Why a resident driver</h3>
+          <p>Starting PowerShell and running <code>Add-Type</code> costs about 700 ms. Paying that on every tool call would make "nudge the cursor" unusable, so the driver boots once and stays alive for the life of the plugin.</p>
+        </div>
+        <div class="feature">
+          <h3>Why real Win32 injection</h3>
+          <p><code>SetCursorPos</code>, <code>mouse_event</code> and <code>SendInput</code> go through the system input path. Foreground applications receive genuine mouse and keyboard messages rather than synthetic events a framework has to special-case.</p>
+        </div>
+        <div class="feature">
+          <h3>Why the path matters</h3>
+          <p>The driver computes a quadratic Bezier bow, walks it with an <code>easeInOutCubic</code> curve, adds mid-path jitter that decays toward both ends, and settles with a tiny overshoot correction.</p>
+        </div>
+        <div class="feature">
+          <h3>Why UTF-8 everywhere</h3>
+          <p>PowerShell 5.1 decodes stdin as GBK by default, which turned any Chinese input into mojibake before it reached <code>JSON.parse</code>. Both streams are forced to UTF-8 without a BOM.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RESULTS ============ -->
+  <section id="results">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Measured, not claimed</div>
+        <h2>Numbers from the test suite.</h2>
+        <p>Run on a 1920×1080 Windows 11 desktop with <code>npm test</code> and <code>npm run test:trajectory</code>.</p>
+      </div>
+
+      <div class="metrics">
+        <div class="metric"><div class="v">0.0<small> px</small></div><div class="l">Landing error, absolute and relative moves</div></div>
+        <div class="metric"><div class="v">11.7<small> px</small></div><div class="l">Largest single step across a 1000 ms sweep</div></div>
+        <div class="metric"><div class="v">41<small> / 41</small></div><div class="l">Functional checks passing</div></div>
+        <div class="metric"><div class="v">800<small>×600</small></div><div class="l">Exact output of a 200×150 region at zoom 4</div></div>
+      </div>
+
+      <div style="margin-top:22px" class="card">
+        <h4>Velocity profile</h4>
+        <div class="sub">pixels per sample, start → middle → end</div>
+        <svg viewBox="0 0 640 120" style="width:100%;height:auto;display:block;margin-top:10px" role="img" aria-label="Bar chart of speed at the start, middle and end of a cursor move: 1.9, 8.5, 1.9 pixels per sample">
+          <line x1="0" y1="96" x2="640" y2="96" stroke="#22303f"/>
+          <rect x="90"  y="74" width="86" height="22" rx="4" fill="#2f5f7a"/>
+          <rect x="277" y="0"  width="86" height="96" rx="4" fill="#38a3a5"/>
+          <rect x="464" y="74" width="86" height="22" rx="4" fill="#2f5f7a"/>
+          <text x="133" y="114" fill="#93a4b8" font-size="12" text-anchor="middle" font-family="ui-monospace, monospace">1.9</text>
+          <text x="320" y="114" fill="#93a4b8" font-size="12" text-anchor="middle" font-family="ui-monospace, monospace">8.5</text>
+          <text x="507" y="114" fill="#93a4b8" font-size="12" text-anchor="middle" font-family="ui-monospace, monospace">1.9</text>
+          <text x="133" y="-6" fill="#64748b" font-size="11" text-anchor="middle">start</text>
+          <text x="320" y="-6" fill="#64748b" font-size="11" text-anchor="middle">middle</text>
+          <text x="507" y="-6" fill="#64748b" font-size="11" text-anchor="middle">end</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LIMITS ============ -->
+  <section id="limits">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Straight talk</div>
+        <h2>What it deliberately does not do.</h2>
+      </div>
+      <div class="limits">
+        <div class="limit"><span class="mark">!</span><span><b>Windows only.</b> The driver is built on <code>user32.dll</code> and <code>gdi32.dll</code>. There is no macOS or Linux path, and no plan for one.</span></div>
+        <div class="limit"><span class="mark">!</span><span><b>Elevated windows block it.</b> When Task Manager or a UAC prompt is in the foreground, Windows drops injection from a non-elevated process — UIPI working as designed. Run the host elevated if you need to drive elevated windows.</span></div>
+        <div class="limit"><span class="mark">!</span><span><b>Needs an interactive desktop.</b> Locked screens, logged-out sessions and Session 0 services cannot receive input.</span></div>
+        <div class="limit"><span class="mark">!</span><span><b>It sees pixels, not semantics.</b> <code>human_screenshot</code> does not read the accessibility tree. Pair it with a DOM or UIA tool when you need structure rather than an image.</span></div>
+        <div class="limit"><span class="mark">!</span><span><b>One driver per desktop.</b> Two plugin instances mean two drivers fighting over the single physical cursor.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INSTALL ============ -->
+  <section id="install-full">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Get started</div>
+        <h2>Install, verify, drive.</h2>
+      </div>
+      <pre style="font-size:13.5px"><span class="c"># 1. install from GitHub</span>
+dsh plugin --profile &lt;your-profile&gt; add github:20700499ww-byte/dsh-plugin-human-input
+
+<span class="c"># 2. confirm the bundle layer is present</span>
+dsh --profile &lt;your-profile&gt; --dump-config
+<span class="c"># expect a "# == dsh-plugin-human-input" layer</span>
+
+<span class="c"># 3. from a model session, ask for a gesture</span>
+<span class="c">#    "move the cursor to the search box, click it, and type hello"</span></pre>
+      <p style="color:var(--muted);font-size:14.5px;margin-top:16px">
+        Requirements: Windows 10/11, Node.js ≥ 20, DeepSeek Harness <code>&gt;=0.2.0-rc.5 &lt;0.3.0</code>,
+        and an unlocked interactive session. No native build step, no runtime network access.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-grid">
+    <div>MIT licensed · built by <a href="https://github.com/20700499ww-byte">20700499ww-byte</a></div>
+    <div class="foot-links">
+      <a href="https://github.com/20700499ww-byte/dsh-plugin-human-input">Source</a>
+      <a href="https://github.com/20700499ww-byte/dsh-plugin-human-input/blob/main/README.md">README</a>
+      <a href="https://github.com/20700499ww-byte/dsh-plugin-human-input/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/20700499ww-byte/dsh-plugin-human-input/issues">Issues</a>
+      <a href="https://github.com/20700499ww-byte/dsh-plugin-human-input/blob/main/SPONSOR.md">Sponsor</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Open the tool whose hash is targeted, so deep links land expanded.
+  (function () {
+    function expandFromHash() {
+      var id = location.hash.replace('#', '');
+      if (!id) return;
+      var el = document.getElementById(id);
+      if (!el) return;
+      var details = el.closest('details');
+      if (details) details.open = true;
+    }
+    window.addEventListener('hashchange', expandFromHash);
+    expandFromHash();
+  })();
+</script>
+
+</body>
+</html>

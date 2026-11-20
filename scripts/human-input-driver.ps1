@@ -66,6 +66,7 @@ public static class HumanInput
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll", SetLastError = true)] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] p, int cb);
 
     public delegate bool EnumProc(IntPtr h, IntPtr p);
@@ -358,9 +359,12 @@ public static class HumanInput
             if (w <= 0 || hh <= 0) { return true; }
             if (!first) { sb.Append(","); }
             first = false;
+            uint pid = 0;
+            GetWindowThreadProcessId(h, out pid);
             sb.Append("{\"title\":").Append(J(title));
             sb.Append(",\"rect\":[").Append(r.Left).Append(",").Append(r.Top).Append(",").Append(w).Append(",").Append(hh).Append("]");
-            sb.Append(",\"hwnd\":").Append(h.ToInt64()).Append("}");
+            sb.Append(",\"hwnd\":").Append(h.ToInt64());
+            sb.Append(",\"pid\":").Append(pid).Append("}");
             return true;
         }, IntPtr.Zero);
         sb.Append("]");

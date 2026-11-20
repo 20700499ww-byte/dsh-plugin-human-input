@@ -1,62 +1,81 @@
 {
-    "name":  "dsh-plugin-human-input",
-    "version":  "0.3.0",
-    "description":  "Human-like mouse and keyboard control for Windows: eased cursor movement, press/release, drag, per-character typing, plus screenshots to verify the result.",
-    "type":  "module",
-    "main":  "index.js",
-    "exports":  {
-                    ".":  "./index.js",
-                    "./locale/*.json":  "./locale/*.json",
-                    "./icon":  "./icon.svg",
-                    "./package.json":  "./package.json"
-                },
-    "icon":  "./icon.svg",
-    "files":  [
-                  "index.js",
-                  "cordis.patch.yml",
-                  "scripts/human-input-driver.ps1",
-                  "locale/*.json",
-                  "icon.svg",
-                  "README.md",
-                  "SPONSOR.md",
-                  "docs/reward-qr.jpg",
-                  "LICENSE"
-              ],
-    "keywords":  [
-                     "dsh",
-                     "dsh-bundle",
-                     "deepseek-harness",
-                     "plugin",
-                     "computer-use",
-                     "mouse",
-                     "keyboard",
-                     "automation",
-                     "human-like",
-                     "windows",
-                     "gui-automation",
-                     "rpa"
-                 ],
-    "engines":  {
-                    "node":  "\u003e=20",
-                    "dsh":  "\u003e=0.2.0-rc.5 \u003c0.3.0"
-                },
-    "os":  [
-               "win32"
-           ],
-    "license":  "MIT",
-    "author":  "20700499ww-byte",
-    "repository":  {
-                       "type":  "git",
-                       "url":  "git+https://github.com/20700499ww-byte/dsh-plugin-human-input.git"
-                   },
-    "homepage":  "https://github.com/20700499ww-byte/dsh-plugin-human-input#readme",
-    "dsh":  {
-                "manifestVersion":  1,
-                "bundle":  {
-                               "patch":  "./cordis.patch.yml"
-                           }
-            },
-    "publishConfig":  {
-                          "access":  "public"
-                      }
+  "name": "dsh-plugin-human-input",
+  "version": "0.4.0",
+  "description": "Human-like mouse and keyboard control for Windows: eased cursor paths, press/release, drag, per-character typing, and grid-overlay screenshots so an agent can verify what it just did.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "scripts/human-input-driver.ps1",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "SPONSOR.md",
+    "docs/reward-qr.jpg",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek-harness",
+    "plugin",
+    "computer-use",
+    "gui-automation",
+    "desktop-automation",
+    "rpa",
+    "mouse",
+    "keyboard",
+    "human-like",
+    "windows",
+    "powershell",
+    "win32",
+    "screenshot"
+  ],
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.0-rc.5 <0.3.0"
+  },
+  "os": [
+    "win32"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "20700499ww-byte",
+    "url": "https://github.com/20700499ww-byte"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/20700499ww-byte/dsh-plugin-human-input.git"
+  },
+  "homepage": "https://20700499ww-byte.github.io/dsh-plugin-human-input/",
+  "bugs": {
+    "url": "https://github.com/20700499ww-byte/dsh-plugin-human-input/issues"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/20700499ww-byte/dsh-plugin-human-input/blob/main/SPONSOR.md"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node test-full.mjs",
+    "test:trajectory": "node test-trajectory.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  manifest:
+    name: Manifest & plugin contract
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: package.json parses and has required bundle fields
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if (-not $pkg.name) { throw 'package.json: missing name' }
+          if (-not $pkg.version) { throw 'package.json: missing version' }
+          if (-not $pkg.dsh.bundle.patch) { throw 'package.json: missing dsh.bundle.patch' }
+          if (-not (Test-Path $pkg.dsh.bundle.patch)) { throw "patch file not found: $($pkg.dsh.bundle.patch)" }
+          if (-not (Test-Path $pkg.main)) { throw "main not found: $($pkg.main)" }
+          foreach ($f in $pkg.files) {
+            if ($f -like '*/.json') { continue }
+            if ($f -notmatch '\*' -and -not (Test-Path $f)) { throw "files[] entry missing: $f" }
+          }
+          Write-Host "manifest OK: $($pkg.name)@$($pkg.version)"
+
+      - name: index.js exports the plugin contract
+        shell: pwsh
+        run: |
+          $js = @'
+          const m = await import('./index.js')
+          if (typeof m.apply !== 'function') throw new Error('missing export: apply')
+          if (!m.name) throw new Error('missing export: name')
+          if (!Array.isArray(m.inject)) throw new Error('missing export: inject')
+          console.log('contract OK:', m.name, '| inject:', m.inject.join(','))
+          '@
+          $js | Out-File -Encoding utf8 check.mjs
+          node check.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'contract check failed' }
+
+      - name: locale files are valid JSON
+        shell: pwsh
+        run: |
+          # Read as UTF-8 explicitly: Windows PowerShell 5.1 defaults to the
+          # system ANSI codepage and would mangle the Chinese locale file.
+          Get-ChildItem locale\*.json | ForEach-Object {
+            $raw = [System.IO.File]::ReadAllText($_.FullName, [System.Text.UTF8Encoding]::new($false))
+            $raw | ConvertFrom-Json | Out-Null
+            Write-Host "OK $($_.Name)"
+          }
+
+      - name: driver script parses and declares the tool set
+        shell: pwsh
+        run: |
+          $err = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/human-input-driver.ps1), [ref]$null, [ref]$err) | Out-Null
+          if ($err -and $err.Count) { $err | ForEach-Object { Write-Host $_ }; throw 'driver parse errors' }
+          Write-Host 'driver parses OK'

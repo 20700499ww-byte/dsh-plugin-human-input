@@ -217,7 +217,11 @@ function estimateTimeout(req) {
   const ms = Number(req.ms ?? 0)
   const typing = typeof req.text === 'string' ? req.text.length * (Number(req.delay ?? 35) * 1.5 + 40) : 0
   const clicks = Math.abs(Number(req.clicks ?? 0)) * 120
-  return Math.max(8000, ms + typing + clicks + 8000)
+  // wait_window 与 wait 自己就会阻塞到 timeout/ms；不把它们算进来，
+  // 默认 8s 预算会先于 wait_window 的 15s 默认值触发，导致长等待被误杀。
+  const waiting =
+    typeof req.timeout === 'number' ? Number(req.timeout) : 0
+  return Math.max(8000, ms + typing + clicks + waiting + 8000)
 }
 
 // ---------------------------------------------------------------------------
@@ -408,8 +412,9 @@ export function apply(ctx, config = {}) {
   ctx.tools.register({
     name: 'human_window',
     description:
-      '窗口感知与切换（不截图，只取标题与矩形位置）。action=list 列出所有可见窗口（含 hwnd 与 rect）；' +
+      '窗口感知与切换（不截图，只取标题与矩形位置）。action=list 列出所有可见窗口（含 hwnd、rect、pid）；' +
       'action=active 取当前前台窗口；action=focus 把指定 hwnd 提到前台。' +
+      'list 可带 filter（标题子串，不区分大小写）与 pid 过滤，用来在一堆窗口里快速定位目标。' +
       '要点击某窗口内的位置时，先用 list 拿到 rect，再用 human_pointer 移到 rect 内的坐标。',
     parameters: {
       type: 'object',
@@ -418,14 +423,27 @@ export function apply(ctx, config = {}) {
       properties: {
         action: { type: 'string', enum: ['list', 'active', 'focus'], description: '要执行的动作' },
         hwnd: { type: 'number', description: 'focus 的目标窗口句柄' },
+        filter: { type: 'string', description: 'list 时按标题子串过滤（不区分大小写）' },
+        pid: { type: 'integer', description: 'list 时只保留属于该进程的窗口' },
       },
     },
     output: { schema: OUT_SCHEMA, render: (_a, v) => textRender(v.result) },
     isConcurrencySafe: () => true,
     async execute(args) {
       switch (args.action) {
-        case 'list':
-          return call({ op: 'windows' }, 20000)
+        case 'list': {
+          const res = await call({ op: 'windows' }, 20000)
+          const filter = typeof args.filter === 'string' ? args.filter.trim().toLowerCase() : ''
+          const pid = args.pid == null ? null : Number(args.pid)
+          if (!filter && pid == null) return res
+          const all = JSON.parse(res.result)
+          const kept = all.filter(
+            (w) =>
+              (!filter || String(w.title ?? '').toLowerCase().includes(filter)) &&
+              (pid == null || Number(w.pid) === pid),
+          )
+          return { ok: true, result: JSON.stringify(kept) }
+        }
         case 'active':
           return call({ op: 'active' })
         case 'focus':
@@ -444,14 +462,18 @@ export function apply(ctx, config = {}) {
     name: 'human_script',
     description:
       '在一次调用里按顺序执行一串微动作，避免每次工具往返的延迟。适合"慢慢挪过去→停一下→按下→拖→松开"这种连续手势。' +
-      'steps 里每项是 {op, ...}，op 支持 move/move_by/click/press/release/drag/scroll/key/type/wait；' +
+      'steps 里每项是 {op, ...}，op 支持 move/move_by/click/click_at/press/release/drag/scroll/key/type/wait/wait_window/focus；' +
       '字段与 human_pointer / human_keyboard 相同（move 用 x,y；move_by 用 dx,dy；drag 用 from,to；等）。' +
-      '任何时刻按 ESC 中止，返回 aborted。',
+      'dryRun=true 只校验每一步并返回计划，不真正操作鼠标键盘。任何时刻按 ESC 中止，返回 aborted。',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['steps'],
       properties: {
+        dryRun: {
+          type: 'boolean',
+          description: '只校验并返回将要执行的步骤，不产生任何输入事件（默认 false）',
+        },
         steps: {
           type: 'array',
           description: '按顺序执行的动作数组，最多 200 个',
@@ -462,7 +484,7 @@ export function apply(ctx, config = {}) {
             properties: {
               op: {
                 type: 'string',
-                description: 'move/move_by/click/press/release/drag/scroll/key/type/wait',
+                description: 'move/move_by/click/click_at/press/release/drag/scroll/key/type/wait/wait_window/focus',
               },
               x: { type: 'number' },
               y: { type: 'number' },
@@ -491,24 +513,30 @@ export function apply(ctx, config = {}) {
       if (!Array.isArray(args.steps) || args.steps.length === 0) throw new Error('steps 需要非空数组')
       if (args.steps.length > 200) throw new Error('steps 一次最多 200 个')
 
-      const done = []
+      // 先把每一步翻译成驱动指令：校验与执行共用同一份结果，
+      // 避免 dryRun 通过但真正执行时才炸。
+      const plan = []
       for (const step of args.steps) {
         const op = String(step.op ?? '')
         let req
         switch (op) {
           case 'move':
+            if (step.x == null || step.y == null) throw new Error(`第 ${plan.length + 1} 步 move 需要 x 和 y`)
             req = { op: 'move', x: step.x, y: step.y, ms: scale(step.ms, 380) }
             break
           case 'move_by':
+            if (step.dx == null && step.dy == null) throw new Error(`第 ${plan.length + 1} 步 move_by 需要 dx 和/或 dy`)
             req = { op: 'rmove', dx: step.dx ?? 0, dy: step.dy ?? 0, ms: scale(step.ms, 300) }
             break
           case 'click':
             req = { op: 'click', button: step.button ?? 'left', count: step.count ?? 1 }
             break
           case 'click_at':
+            if (step.x == null || step.y == null) throw new Error(`第 ${plan.length + 1} 步 click_at 需要 x 和 y`)
             req = { op: 'click_at', x: step.x, y: step.y, button: step.button ?? 'left', count: step.count ?? 1, ms: scale(step.ms, 320) }
             break
           case 'wait_window':
+            if (!step.title) throw new Error(`第 ${plan.length + 1} 步 wait_window 需要 title`)
             req = { op: 'wait_window', title: step.title, timeout: step.timeout ?? 15000 }
             break
           case 'press':
@@ -518,10 +546,11 @@ export function apply(ctx, config = {}) {
             req = { op: 'up', button: step.button ?? 'left' }
             break
           case 'drag':
+            if (!step.from || !step.to) throw new Error(`第 ${plan.length + 1} 步 drag 需要 from 和 to`)
             req = {
               op: 'drag',
-              from: [step.from?.x, step.from?.y],
-              to: [step.to?.x, step.to?.y],
+              from: [step.from.x, step.from.y],
+              to: [step.to.x, step.to.y],
               ms: scale(step.ms, 600),
             }
             break
@@ -529,6 +558,7 @@ export function apply(ctx, config = {}) {
             req = { op: 'scroll', clicks: step.clicks ?? 3 }
             break
           case 'key':
+            if (!step.combo) throw new Error(`第 ${plan.length + 1} 步 key 需要 combo`)
             req = { op: 'key', combo: step.combo }
             break
           case 'type':
@@ -542,16 +572,33 @@ export function apply(ctx, config = {}) {
             req = { op: 'wait', ms: step.ms ?? 200 }
             break
           case 'focus':
+            if (step.hwnd == null) throw new Error(`第 ${plan.length + 1} 步 focus 需要 hwnd`)
             req = { op: 'focus', hwnd: step.hwnd }
             break
           default:
-            throw new Error(`第 ${done.length + 1} 步 op 未知：${op}`)
+            throw new Error(`第 ${plan.length + 1} 步 op 未知：${op}`)
         }
+        plan.push({ step: plan.length + 1, op, req })
+      }
+
+      if (args.dryRun) {
+        return {
+          ok: true,
+          result: {
+            dryRun: true,
+            steps: plan.length,
+            planned: plan.map((p) => ({ step: p.step, op: p.op, request: p.req })),
+          },
+        }
+      }
+
+      const done = []
+      for (const { step, op, req } of plan) {
         const res = await driver.request(req, estimateTimeout(req) + 5000)
         if (res && res.ok === false) {
-          throw new Error(`第 ${done.length + 1} 步（${op}）失败：${res.error ?? '未知错误'}`)
+          throw new Error(`第 ${step} 步（${op}）失败：${res.error ?? '未知错误'}`)
         }
-        done.push({ step: done.length + 1, op, ok: true })
+        done.push({ step, op, ok: true })
         if (res && res.aborted) {
           return { ok: false, aborted: true, result: { completed: done, abortedAt: done.length } }
         }
